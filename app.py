@@ -13,7 +13,6 @@ import pandas as pd
 import re
 import traceback
 
-# Import DB Manager
 from db_manager import (
     set_db_config, save_transaction, get_df, get_balances,
     check_premium, encrypt_data, set_user_budget, get_user_budget, 
@@ -23,9 +22,6 @@ from db_manager import (
     process_goal_deposit, get_best_wallet_for_goal, update_goal
 )
 
-# ==========================================
-# KONFIGURASI FLASK & PATH
-# ==========================================
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,39 +53,24 @@ def normalize_wallet(w_raw):
     else: return 'E-Wallet'
 
 def clean_number(value):
-    """Membersihkan string input menjadi integer murni"""
     if not value: return 0
-    # Hapus semua karakter yang bukan angka
     clean_str = re.sub(r'[^\d]', '', str(value))
-    try:
-        return int(clean_str)
-    except:
-        return 0
+    try: return int(clean_str)
+    except: return 0
 
 def parse_gemini_json(response_text, original_text):
-    # 1. Bersihkan Markdown Code Blocks
     clean = response_text.replace('```json', '').replace('```', '').strip()
-    
     data = []
     try:
-        # 2. Coba parsing langsung
         data = json.loads(clean)
     except:
         try:
-            # 3. Jika gagal, cari pola List [...] atau Object {...} dengan Regex
             match_list = re.search(r'\[.*\]', clean, re.DOTALL)
             match_obj = re.search(r'\{.*\}', clean, re.DOTALL)
-            
-            if match_list:
-                data = json.loads(match_list.group(0))
-            elif match_obj:
-                data = [json.loads(match_obj.group(0))]
-            else:
-                print(f"DEBUG: Gagal regex JSON. Raw text: {clean}")
-                return []
-        except Exception as e:
-            print(f"DEBUG: JSON Error: {e}")
-            return []
+            if match_list: data = json.loads(match_list.group(0))
+            elif match_obj: data = [json.loads(match_obj.group(0))]
+            else: return []
+        except: return []
 
     if isinstance(data, dict): data = [data]
     if not isinstance(data, list): return []
@@ -98,64 +79,34 @@ def parse_gemini_json(response_text, original_text):
     valid_cats = ['Makanan', 'Transport', 'Tagihan', 'Belanja', 'Kesehatan', 'Hiburan', 'Pemasukan', 'Lainnya']
     
     for item in data:
-        # Ambil nominal dengan pembersihan
         raw_amt = item.get('amount', 0)
         amount = clean_number(raw_amt)
-        
         if amount == 0: continue
-        
         cat = str(item.get('category', 'Lainnya')).title()
-        
-        # Logika Category & Type
         if cat == 'Pemasukan':
-            item['type'] = 'IN'
-            item['category'] = 'Pemasukan'
+            item['type'] = 'IN'; item['category'] = 'Pemasukan'
         else:
-            item['type'] = 'OUT'
-            item['category'] = cat if cat in valid_cats else 'Lainnya'
-
+            item['type'] = 'OUT'; item['category'] = cat if cat in valid_cats else 'Lainnya'
         item['wallet'] = normalize_wallet(item.get('wallet', 'Cash'))
         item['description'] = item.get('description', original_text)
         item['amount'] = amount
         final_data.append(item)
-    
     return final_data
 
 def ask_gemini_web(text=None, file_path=None, mode="text", mime_type=None):
     model = genai.GenerativeModel('gemini-2.0-flash')
-    
-    # PROMPT DIPERBAIKI: Lebih eksplisit meminta JSON murni tanpa basa-basi
-    base_prompt = """
-    Extract financial transaction details into a JSON Array.
-    
-    Rules:
-    1. "category" MUST be one of: [Makanan, Transport, Tagihan, Belanja, Kesehatan, Hiburan, Pemasukan, Lainnya].
-    2. "amount" MUST be an integer number (no Rp, no dots, no commas).
-    3. "wallet" hints: gopay/ovo/dana/shopee -> "E-Wallet", tunai/cash -> "Cash", atm/transfer/bca/mandiri -> "Bank". Default: "Cash".
-    4. If the text implies income (gajian, dikasih, terima), set category to "Pemasukan".
-    
-    Output Format Example:
-    [{"amount": 50000, "category": "Makanan", "wallet": "Cash", "description": "Nasi Goreng"}]
-    
-    RETURN ONLY JSON. NO MARKDOWN. NO EXPLANATION.
-    """
-    
+    base_prompt = """Extract financial transaction details into a JSON Array. Rules: 1. Category MUST be one of: [Makanan, Transport, Tagihan, Belanja, Kesehatan, Hiburan, Pemasukan, Lainnya]. 2. Amount MUST be an integer number. 3. Wallet hints: gopay/ovo/dana->E-Wallet, atm/bank->Bank. Default: Cash. 4. If income, set category to Pemasukan. RETURN ONLY JSON."""
     try:
         if mode in ["image", "voice"] and file_path:
             if not os.path.exists(file_path): return []
-            prompt_suf = "\nAnalyze this receipt/audio."
-            res = model.generate_content([base_prompt + prompt_suf, genai.upload_file(path=file_path, mime_type=mime_type)])
+            res = model.generate_content([base_prompt, genai.upload_file(path=file_path, mime_type=mime_type)])
             orig = "Scan Bon" if mode == "image" else "Voice Note"
         else:
             res = model.generate_content(f"{base_prompt}\nInput Text: \"{text}\"")
             orig = text
-            
         return parse_gemini_json(res.text, orig)
-    except Exception as e:
-        print(f"AI Connection Error: {e}")
-        return []
+    except: return []
 
-# --- ROUTES ---
 def validate_telegram_auth(init_data):
     try:
         parsed_data = dict(urllib.parse.parse_qsl(init_data))
@@ -168,6 +119,7 @@ def validate_telegram_auth(init_data):
         return None
     except: return None
 
+# --- ROUTES ---
 @app.route('/')
 def home(): return render_template('dashboard.html')
 
@@ -186,10 +138,6 @@ def api_get_data():
     uid = session['user_id']
     try:
         is_prem, expiry = check_premium(uid)
-        is_admin = uid in ADMIN_IDS
-        is_vip = uid in VIP_USERS
-        
-        # Load balances breakdown for Modal AC 3.3
         balances = get_balances(uid)
         df = get_df(uid)
         budget_limit = get_user_budget(uid) 
@@ -202,7 +150,6 @@ def api_get_data():
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
             inc = df[df['type']=='IN']['amount'].sum()
             out = df[df['type']=='OUT']['amount'].sum()
-            
             df_out = df[df['type'] == 'OUT']
             if not df_out.empty:
                 df_chart = df_out.groupby('category')['amount'].sum().reset_index()
@@ -215,7 +162,6 @@ def api_get_data():
                 g = monthly_groups.get_group(p)
                 monthly_inc.append(float(g[g['type']=='IN']['amount'].sum()))
                 monthly_exp.append(float(g[g['type']=='OUT']['amount'].sum()))
-
             recents = df.head(50).to_dict(orient='records')
 
         formatted_recents = []
@@ -227,77 +173,110 @@ def api_get_data():
                 
         return jsonify({
             "status": "success",
-            "user_id": uid, "is_prem": is_prem, "is_vip": is_vip, "is_admin": is_admin,
+            "user_id": uid, "is_prem": is_prem, "is_vip": uid in VIP_USERS, "is_admin": uid in ADMIN_IDS,
             "expiry_date": expiry.strftime('%d %b %Y') if expiry else "",
-            "balance": f"{balances['total']:,.0f}", 
-            "income": f"{inc:,.0f}", 
-            "expense": f"{out:,.0f}",
-            # Breakdown for Modal
-            "cash_balance": f"{balances['Cash']:,.0f}", 
-            "ewallet_balance": f"{balances['E-Wallet']:,.0f}",
-            "bank_balance": f"{balances['Bank']:,.0f}", # Added for completeness
+            "balance": f"{balances['total']:,.0f}", "income": f"{inc:,.0f}", "expense": f"{out:,.0f}",
+            "cash_balance": f"{balances['Cash']:,.0f}", "ewallet_balance": f"{balances['E-Wallet']:,.0f}", "bank_balance": f"{balances['Bank']:,.0f}",
             "recents": formatted_recents, "chart_labels": chart_labels, "chart_values": chart_values,
             "budget_limit": budget_limit, "monthly_labels": monthly_labels, "monthly_inc": monthly_inc, "monthly_exp": monthly_exp
         })
     except Exception as e: return jsonify({"status": "error", "message": str(e)})
 
-# === FITUR EDIT GOAL (AC 2) ===
-@app.route('/api/edit_goal', methods=['POST'])
-def api_edit_goal():
+# AC 3.2.1 & 3.2.2 FIX AI LOGIC & FORMULA
+@app.route('/api/optimize_goals', methods=['GET'])
+def api_optimize_goals():
     if 'user_id' not in session: return jsonify({"status": "error"}), 401
-    try:
-        data = request.json
-        # Validasi sederhana
-        if not data.get('title') or not data.get('target'): return jsonify({"status": "error", "message": "Data tidak lengkap"})
+    uid = session['user_id']
+    df = get_df(uid)
+    now_s = datetime.now().strftime("%Y-%m")
+    df_m = df[df['datetime'].dt.strftime('%Y-%m')==now_s] if not df.empty else pd.DataFrame()
+    
+    inc = df_m[df_m['type']=='IN']['amount'].sum() if not df_m.empty else 0
+    exp = df_m[df_m['type']=='OUT']['amount'].sum() if not df_m.empty else 0
+    
+    # --- NEW LOGIC V2.5 ---
+    free_to_spend = inc - exp
+    
+    # Estimasi Tagihan Rutin 7 Hari (rata-rata harian * 7)
+    # Karena belum ada tabel recurring, kita gunakan rata-rata pengeluaran
+    daily_burn_rate = exp / max(1, datetime.now().day)
+    weekly_needs = daily_burn_rate * 7
+    
+    buffer = 50000 # Buffer Minimum
+    
+    # Formula: Saldo Bebas - Kebutuhan 7 Hari - Buffer
+    safe_to_save = max(0, free_to_spend - weekly_needs - buffer)
+    
+    goals = get_goals(uid)
+    advice = []
+    recommended_action = None 
+    calculation_note = ""
+    
+    if not goals:
+        advice.append("⚠️ Anda belum memiliki tujuan keuangan.")
+    elif free_to_spend <= buffer:
+        advice.append(f"⚠️ Sisa dana (Rp {free_to_spend:,.0f}) terlalu tipis.")
+        advice.append("💡 Disarankan menyisakan buffer minimal Rp 50.000.")
+    else:
+        target_goal = next((g for g in goals if g['priority'] == 'P1' and g['current'] < g['target']), None)
+        if not target_goal: target_goal = next((g for g in sorted(goals, key=lambda x: x['deadline']) if g['current'] < g['target']), None)
         
-        success = update_goal(
-            session['user_id'], 
-            data['id'], 
-            data['title'], 
-            clean_number(data['target']), 
-            data['deadline'], 
-            data['priority']
-        )
-        if success: return jsonify({"status": "success"})
-        return jsonify({"status": "error", "message": "Gagal update database"})
-    except Exception as e: return jsonify({"status": "error", "message": str(e)})
+        if target_goal:
+            sisa_butuh = target_goal['target'] - target_goal['current']
+            # Tabung max 100% dari safe_to_save (karena sudah diamankan buffer), tidak melebihi sisa butuh
+            save_amt = min(safe_to_save, sisa_butuh)
+            save_amt = int(save_amt // 1000 * 1000) 
+            
+            if save_amt > 10000:
+                advice.append(f"✅ Keuangan Sehat! Ada dana dingin.")
+                advice.append(f"🚀 Rekomendasi: Isi tujuan <b>{target_goal['title']}</b>.")
+                best_wallet, _ = get_best_wallet_for_goal(uid)
+                recommended_action = { "amount": save_amt, "goal_id": target_goal['id'], "goal_title": target_goal['title'], "wallet": best_wallet }
+                # AC 3.2.2: Transparansi
+                calculation_note = f"Hitungan: Saldo Bebas (Rp {free_to_spend:,.0f}) - Est. Mingguan (Rp {weekly_needs:,.0f}) - Buffer (Rp {buffer:,.0f})"
+            else: 
+                advice.append("✅ Dana aman, tapi belum cukup optimal untuk menabung otomatis.")
+                calculation_note = f"Hitungan: Saldo Bebas (Rp {free_to_spend:,.0f}) - Est. Mingguan (Rp {weekly_needs:,.0f}) - Buffer (Rp {buffer:,.0f})"
+        else: advice.append("🎉 Semua tujuan tercapai!")
 
-# ... (SISA ROUTE LAINNYA SAMA SEPERTI SEBELUMNYA) ...
+    return jsonify({"status": "success", "advice": advice, "action": recommended_action, "calculation_note": calculation_note})
+
+@app.route('/api/download_excel')
+def api_download_excel():
+    if 'user_id' not in session: return jsonify({"status": "error"}), 401
+    uid = session['user_id']; is_prem, _ = check_premium(uid)
+    if not is_prem and not check_export_limit(uid, max_limit=3): return jsonify({"status": "error", "message": "LIMIT_REACHED"}), 403
+    try:
+        df = get_df(uid)
+        if df.empty: return jsonify({"status": "error", "message": "Data kosong"}), 400
+        df = df.drop(columns=['id', 'user_id', 'month_year'], errors='ignore')
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False)
+        output.seek(0)
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f"Laporan_{datetime.now().strftime('%d%m%Y')}.xlsx")
+    except Exception as e: return jsonify({"status": "error", "message": str(e)}), 500
+
+# ... (SISA ROUTE COPY PASTE DARI KODE ANDA SEBELUMNYA UNTUK KELENGKAPAN) ...
 @app.route('/add_transaction', methods=['POST'])
 def add_transaction():
     if 'user_id' not in session: return jsonify({"status": "error", "message": "Sesi habis"})
     uid = session['user_id']
     is_prem, _ = check_premium(uid)
-    
     mode = request.form.get('mode', 'text')
-    
-    # MANUAL
     if mode == 'manual':
         try:
             amount = clean_number(request.form.get('amount'))
             if amount <= 0: return jsonify({"status": "error", "message": "Nominal tidak valid"})
-
-            data = {
-                'amount': amount,
-                'category': request.form.get('category'),
-                'wallet': request.form.get('wallet'),
-                'description': request.form.get('description'),
-                'type': request.form.get('type')
-            }
+            data = {'amount': amount, 'category': request.form.get('category'), 'wallet': request.form.get('wallet'), 'description': request.form.get('description'), 'type': request.form.get('type')}
             if data['type'] == 'OUT':
                 cur = get_wallet_balance_specific(uid, data['wallet'])
                 if cur < data['amount']: return jsonify({"status": "error", "message": f"Saldo {data['wallet']} Kurang (Sisa: {cur:,.0f})"})
-            
             save_transaction(uid, data)
             return jsonify({"status": "success", "count": 1})
         except Exception as e: return jsonify({"status": "error", "message": f"Input Manual Error: {str(e)}"})
-
-    # AI
     file = request.files.get('media_file')
     text_input = request.form.get('text_input')
-    
     if mode in ['image', 'voice'] and not is_prem: return jsonify({"status": "error", "message": "Fitur Pro Terkunci 🔒"})
-
     temp_filename = None
     try:
         data_list = []
@@ -308,22 +287,14 @@ def add_transaction():
             temp_filename = os.path.join(BASE_DIR, f"temp_{uid}_{int(datetime.now().timestamp())}{ext}")
             file.save(temp_filename)
             data_list = ask_gemini_web(file_path=temp_filename, mode=mode, mime_type=file.mimetype)
-        elif text_input:
-            data_list = ask_gemini_web(text=text_input, mode='text')
-
+        elif text_input: data_list = ask_gemini_web(text=text_input, mode='text')
         if not data_list: return jsonify({"status": "error", "message": "AI tidak menemukan data transaksi valid."})
-
-        count = 0
-        error_msg = None
+        count = 0; error_msg = None
         for item in data_list:
             if item['type'] == 'OUT':
                 cur = get_wallet_balance_specific(uid, item['wallet'])
-                if cur < item['amount']: 
-                    error_msg = f"Saldo {item['wallet']} tidak cukup untuk '{item['description']}'"
-                    continue 
-            save_transaction(uid, item)
-            count += 1
-            
+                if cur < item['amount']: error_msg = f"Saldo {item['wallet']} tidak cukup"; continue 
+            save_transaction(uid, item); count += 1
         if count == 0 and error_msg: return jsonify({"status": "error", "message": error_msg})
         elif count == 0: return jsonify({"status": "error", "message": "Gagal menyimpan data."})
         return jsonify({"status": "success", "count": count})
@@ -342,85 +313,25 @@ def api_goals():
             add_goal(uid, data['title'], data['target'], data['deadline'], data['priority'])
             return jsonify({"status": "success"})
         except: return jsonify({"status": "error"})
-    if request.method == 'DELETE':
-        delete_goal(uid, request.args.get('id'))
-        return jsonify({"status": "success"})
+    if request.method == 'DELETE': delete_goal(uid, request.args.get('id')); return jsonify({"status": "success"})
 
-@app.route('/api/optimize_goals', methods=['GET'])
-def api_optimize_goals():
+@app.route('/api/edit_goal', methods=['POST'])
+def api_edit_goal():
     if 'user_id' not in session: return jsonify({"status": "error"}), 401
-    uid = session['user_id']
-    df = get_df(uid)
-    now_s = datetime.now().strftime("%Y-%m")
-    df_m = df[df['datetime'].dt.strftime('%Y-%m')==now_s] if not df.empty else pd.DataFrame()
-    inc = df_m[df_m['type']=='IN']['amount'].sum() if not df_m.empty else 0
-    exp = df_m[df_m['type']=='OUT']['amount'].sum() if not df_m.empty else 0
-    top_cat = "Lainnya"
-    if not df_m.empty:
-        cat_group = df_m[df_m['type']=='OUT'].groupby('category')['amount'].sum().sort_values(ascending=False)
-        if not cat_group.empty: top_cat = cat_group.index[0]
-    free_to_spend = inc - exp
-    goals = get_goals(uid)
-    advice = []
-    recommended_action = None 
-    
-    if not goals:
-        advice.append("⚠️ Anda belum memiliki tujuan keuangan.")
-        advice.append("💡 Buat tujuan baru (ex: Laptop) di tab Rencana.")
-    elif free_to_spend <= 0:
-        advice.append(f"⚠️ Arus kas bulan ini <b>negatif</b> atau pas-pasan.")
-        advice.append(f"📉 Pengeluaran terbesar: <b>{top_cat}</b>.")
-        advice.append("💡 Fokus kurangi pengeluaran sebelum menabung.")
-    else:
-        target_goal = None
-        for g in goals:
-            if g['priority'] == 'P1' and g['current'] < g['target']:
-                target_goal = g; break
-        if not target_goal:
-            goals_sorted = sorted(goals, key=lambda x: x['deadline'])
-            for g in goals_sorted:
-                if g['current'] < g['target']: target_goal = g; break
-        
-        if target_goal:
-            sisa_butuh = target_goal['target'] - target_goal['current']
-            save_amt = min(free_to_spend * 0.8, sisa_butuh)
-            save_amt = int(save_amt // 1000 * 1000) 
-            
-            if save_amt > 10000: 
-                advice.append(f"✅ Arus kas Anda positif! (Sisa: Rp {free_to_spend:,.0f})")
-                advice.append(f"🚀 Percepat tujuan <b>{target_goal['title']}</b>.")
-                best_wallet, _ = get_best_wallet_for_goal(uid)
-                recommended_action = { "amount": save_amt, "goal_id": target_goal['id'], "goal_title": target_goal['title'], "wallet": best_wallet }
-            else: advice.append("✅ Kondisi keuangan aman, tapi sisa dana tipis.")
-        else: advice.append("🎉 Hebat! Semua tujuan keuangan Anda sudah tercapai.")
-
-    return jsonify({"status": "success", "advice": advice, "action": recommended_action})
+    try:
+        data = request.json
+        if update_goal(session['user_id'], data['id'], data['title'], clean_number(data['target']), data['deadline'], data['priority']): return jsonify({"status": "success"})
+        return jsonify({"status": "error", "message": "Gagal update"})
+    except Exception as e: return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/api/goal_deposit', methods=['POST'])
 def api_goal_deposit():
     if 'user_id' not in session: return jsonify({"status": "error"}), 401
-    goal_id = request.form.get('goal_id')
-    wallet_source = request.form.get('wallet_source')
-    amount = clean_number(request.form.get('amount'))
-    if amount <= 0: return jsonify({"status": "error", "message": "Nominal harus > 0"})
-    success, msg = process_goal_deposit(session['user_id'], goal_id, wallet_source, amount)
+    amt = clean_number(request.form.get('amount'))
+    if amt <= 0: return jsonify({"status": "error", "message": "Nominal harus > 0"})
+    success, msg = process_goal_deposit(session['user_id'], request.form.get('goal_id'), request.form.get('wallet_source'), amt)
     if success: return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": msg})
-
-@app.route('/api/download_excel')
-def api_download_excel():
-    if 'user_id' not in session: return jsonify({"status": "error"}), 401
-    uid = session['user_id']; is_prem, _ = check_premium(uid)
-    if not is_prem and not check_export_limit(uid, max_limit=3): return jsonify({"status": "error", "message": "LIMIT_REACHED"}), 403
-    try:
-        df = get_df(uid)
-        if df.empty: return jsonify({"status": "error", "message": "Data kosong"}), 400
-        df = df.drop(columns=['id', 'user_id', 'month_year'], errors='ignore')
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False)
-        output.seek(0)
-        return send_file(output, mimetype='application/octet-stream', as_attachment=True, download_name=f"Laporan_{datetime.now().strftime('%d%m%Y')}.xlsx")
-    except Exception as e: return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/transfer_balance', methods=['POST'])
 def api_transfer_balance():
@@ -446,7 +357,7 @@ def api_download_feedback():
         df = get_df_feedback(); output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False)
         output.seek(0)
-        return send_file(output, mimetype='application/octet-stream', as_attachment=True, download_name="Feedbacks.xlsx")
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name="Feedbacks.xlsx")
     except: return jsonify({"status": "error"})
 
 @app.route('/api/set_budget', methods=['POST'])

@@ -5,9 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from cryptography.fernet import Fernet
 import os
 
-# ==========================================
-# KONFIGURASI PATH DINAMIS
-# ==========================================
+# ... (KONFIGURASI & HELPER SAMA SEPERTI SEBELUMNYA) ...
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'monegment_final.db')
 
@@ -31,9 +29,6 @@ def decrypt_data(token: Any) -> str:
     try: return CIPHER.decrypt(token.encode()).decode() if token else "0"
     except: return "0"
 
-# ==========================================
-# DATABASE INIT
-# ==========================================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -43,12 +38,11 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS budgets (user_id INTEGER PRIMARY KEY, limit_amount INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS daily_exports (user_id INTEGER, date TEXT, count INTEGER, PRIMARY KEY(user_id, date))''')
     c.execute('''CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, target_amount TEXT, current_amount TEXT, deadline TEXT, priority TEXT, created_at TEXT)''')
-    
     try: c.execute("SELECT username FROM feedbacks LIMIT 1")
     except: c.execute("ALTER TABLE feedbacks ADD COLUMN username TEXT")
     conn.commit(); conn.close()
 
-# ... (FUNGSI LAIN: get_df, get_balances, check_premium TETAP SAMA) ...
+# ... (FUNGSI GET_DF, GET_BALANCES, DLL TETAP SAMA) ...
 def get_df(user_id: int, limit: int = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     try:
@@ -91,7 +85,6 @@ def get_wallet_balance_specific(user_id: int, wallet_name: str) -> float:
     return bals.get(key, 0.0)
 
 def get_best_wallet_for_goal(user_id: int) -> Tuple[str, float]:
-    """Mencari dompet dengan saldo terbesar untuk saran AI"""
     bals = get_balances(user_id)
     best_w = "Cash"
     max_bal = 0
@@ -118,12 +111,23 @@ def save_transaction(user_id: int, data: Dict):
     except Exception as e: print(f"DB Save Error: {e}")
     finally: conn.close()
 
+# === GOAL FUNCTIONS ===
 def add_goal(user_id, title, target, deadline, priority):
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     dt = datetime.now().strftime("%Y-%m-%d")
     try:
         c.execute("INSERT INTO goals (user_id, title, target_amount, current_amount, deadline, priority, created_at) VALUES (?,?,?,?,?,?,?)",
                   (user_id, title, encrypt_data(target), encrypt_data(0), deadline, priority, dt))
+        conn.commit(); return True
+    except: return False
+    finally: conn.close()
+
+def update_goal(user_id, goal_id, title, target, deadline, priority):
+    """Fitur Edit Tujuan (AC 2.2)"""
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    try:
+        c.execute("UPDATE goals SET title=?, target_amount=?, deadline=?, priority=? WHERE id=? AND user_id=?",
+                  (title, encrypt_data(target), deadline, priority, goal_id, user_id))
         conn.commit(); return True
     except: return False
     finally: conn.close()
@@ -145,48 +149,29 @@ def get_goals(user_id):
         except: pass
     conn.close(); return goals
 
-def process_goal_deposit(user_id: int, goal_id: int, wallet_source: str, amount: int) -> Tuple[bool, str]:
-    """Memproses pengisian tabungan: Kurangi Wallet, Tambah Goal"""
-    # 1. Cek Saldo Wallet
-    bal = get_wallet_balance_specific(user_id, wallet_source)
-    if bal < amount:
-        return False, f"Saldo {wallet_source} tidak cukup (Sisa: {bal:,.0f})."
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    try:
-        # 2. Ambil data Goal saat ini
-        c.execute("SELECT title, current_amount FROM goals WHERE id=? AND user_id=?", (goal_id, user_id))
-        res = c.fetchone()
-        if not res:
-            return False, "Tujuan tidak ditemukan."
-        
-        goal_title = res[0]
-        current_saved = float(decrypt_data(res[1]))
-        new_saved = current_saved + amount
-
-        # 3. Catat Transaksi Pengeluaran (Uang keluar dari dompet ke tabungan)
-        dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        desc = f"Tabungan ke {goal_title}"
-        c.execute("INSERT INTO transactions (user_id, datetime, type, amount, category, wallet, description) VALUES (?,?,?,?,?,?,?)",
-                  (user_id, dt, 'OUT', encrypt_data(amount), encrypt_data('Tabungan'), encrypt_data(wallet_source), encrypt_data(desc)))
-
-        # 4. Update Saldo Goal
-        c.execute("UPDATE goals SET current_amount=? WHERE id=? AND user_id=?", (encrypt_data(new_saved), goal_id, user_id))
-        
-        conn.commit()
-        return True, "Berhasil menabung!"
-    except Exception as e:
-        return False, str(e)
-    finally:
-        conn.close()
-
 def delete_goal(user_id, goal_id):
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     c.execute("DELETE FROM goals WHERE id=? AND user_id=?", (goal_id, user_id))
     conn.commit(); conn.close()
 
-# ... (SISA FUNGSI RBAC, DLL TETAP SAMA) ...
+def process_goal_deposit(user_id: int, goal_id: int, wallet_source: str, amount: int) -> Tuple[bool, str]:
+    bal = get_wallet_balance_specific(user_id, wallet_source)
+    if bal < amount: return False, f"Saldo {wallet_source} tidak cukup (Sisa: {bal:,.0f})."
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    try:
+        c.execute("SELECT title, current_amount FROM goals WHERE id=? AND user_id=?", (goal_id, user_id))
+        res = c.fetchone()
+        if not res: return False, "Tujuan tidak ditemukan."
+        goal_title = res[0]; current_saved = float(decrypt_data(res[1])); new_saved = current_saved + amount
+        dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); desc = f"Tabungan ke {goal_title}"
+        c.execute("INSERT INTO transactions (user_id, datetime, type, amount, category, wallet, description) VALUES (?,?,?,?,?,?,?)",
+                  (user_id, dt, 'OUT', encrypt_data(amount), encrypt_data('Tabungan'), encrypt_data(wallet_source), encrypt_data(desc)))
+        c.execute("UPDATE goals SET current_amount=? WHERE id=? AND user_id=?", (encrypt_data(new_saved), goal_id, user_id))
+        conn.commit(); return True, "Berhasil menabung!"
+    except Exception as e: return False, str(e)
+    finally: conn.close()
+
+# ... (SISA FUNGSI LAIN TETAP SAMA: check_premium, set_premium, delete_user_data, dll) ...
 def check_premium(user_id: int) -> Tuple[bool, Optional[datetime]]:
     if user_id in VIP_USERS or user_id in ADMIN_IDS: return True, datetime(2099, 12, 31)
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
