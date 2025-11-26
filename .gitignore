@@ -1,0 +1,28 @@
+# Komentar dimulai dengan tanda pagar (#)
+
+# Folder yang berisi dependensi (seperti di proyek Node.js, Ruby, Python, dll.)
+node_modules/
+vendor/
+
+# File hasil kompilasi atau cache
+*.o
+*.pyc
+/dist/
+/build/
+
+# File log dan temporer
+*.log
+*.tmp
+*~
+
+# File konfigurasi yang berisi data sensitif
+.env
+
+# File sistem operasi (sering muncul di macOS)
+.DS_Store
+
+# File editor (Visual Studio Code)
+.vscode/
+
+# Kecualikan file contoh (jika .env di-ignore, tapi .env.example tidak)
+!.env.dummy

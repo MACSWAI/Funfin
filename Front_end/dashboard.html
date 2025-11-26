@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Monegment Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        .tab-content { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .recording-pulse { animation: pulse-red 1.5s infinite; }
+        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .pb-safe-nav { padding-bottom: calc(env(safe-area-inset-bottom) + 12px); }
+        .pt-safe-top { padding-top: calc(env(safe-area-inset-top) + 10px); }
+        .custom-input { background: #0f172a; color: white; border: 1px solid #334155; border-radius: 0.75rem; padding: 0.75rem 1rem; width: 100%; outline: none; font-size: 0.875rem; position: relative; z-index: 20; }
+        .custom-input:focus { border-color: #a855f7; }
+    </style>
+</head>
+<body class="bg-slate-900 text-white font-sans h-screen w-screen overflow-hidden selection:bg-purple-500 selection:text-white">
+
+    <div id="errorBox" class="hidden fixed top-0 left-0 w-full bg-red-600 text-white p-4 z-[100] text-xs break-words shadow-xl font-medium flex items-center gap-3">
+        <i class="fas fa-circle-exclamation text-lg"></i><span id="errorText">Error</span>
+    </div>
+
+    <div id="loader" class="fixed inset-0 bg-slate-900 z-[90] flex flex-col items-center justify-center transition-opacity duration-300">
+        <div class="relative"><div class="w-12 h-12 rounded-full border-4 border-slate-700"></div><div class="absolute top-0 left-0 w-12 h-12 rounded-full border-4 border-purple-500 border-t-transparent animate-spin"></div></div>
+        <p class="text-slate-400 text-sm mt-4 font-medium animate-pulse" id="loaderText">Menghubungkan...</p>
+        <button onclick="window.location.reload()" class="mt-8 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-500 hover:text-white transition"><i class="fas fa-rotate-right mr-2"></i>Muat Ulang</button>
+    </div>
+
+    <!-- INPUT PAGE -->
+    <div id="inputOverlay" class="fixed inset-0 bg-slate-900 z-[80] hidden flex-col transition-transform duration-300 translate-y-full">
+        <div class="flex justify-between items-center p-5 border-b border-slate-800 pt-safe-top bg-slate-900">
+            <h2 class="text-lg font-bold"><i class="fas fa-pen-to-square mr-2 text-purple-500"></i>Tambah Data</h2>
+            <button onclick="closeInputPage()" class="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-6">
+            <div class="bg-slate-800 p-1 rounded-xl flex shadow-inner">
+                <button onclick="switchPageMode('manual')" id="tab-mode-manual" class="flex-1 py-2.5 rounded-lg text-sm font-medium transition bg-purple-600 text-white shadow-lg flex items-center justify-center gap-2"><i class="fas fa-hand-pointer"></i> Manual</button>
+                <button onclick="switchPageMode('ai')" id="tab-mode-ai" class="flex-1 py-2.5 rounded-lg text-sm font-medium text-slate-400 transition hover:text-white flex items-center justify-center gap-2"><i class="fas fa-wand-magic-sparkles"></i> AI Magic</button>
+            </div>
+
+            <div id="page-manual" class="space-y-4 animate-fade-in">
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="setManualType('OUT')" id="btn-type-out" class="py-3 border border-rose-500/50 bg-rose-500/10 text-rose-500 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition ring-2 ring-rose-500 shadow-lg shadow-rose-900/20"><i class="fas fa-arrow-trend-down"></i> Pengeluaran</button>
+                    <button onclick="setManualType('IN')" id="btn-type-in" class="py-3 border border-slate-700 bg-slate-800 text-slate-400 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition"><i class="fas fa-arrow-trend-up"></i> Pemasukan</button>
+                </div>
+                <div class="space-y-4 bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+                    <div class="relative"><label class="text-xs font-semibold text-slate-400 ml-1 mb-1.5 block uppercase tracking-wider">Nominal (Rp)</label><input type="number" id="manualAmount" placeholder="0" class="custom-input font-bold text-lg pl-4" enterkeyhint="done"></div>
+                    <div class="relative"><label class="text-xs font-semibold text-slate-400 ml-1 mb-1.5 block uppercase tracking-wider">Keterangan</label><input type="text" id="manualDesc" placeholder="Contoh: Nasi Goreng" class="custom-input" enterkeyhint="done"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div id="catWrapper"><label class="text-xs font-semibold text-slate-400 ml-1 mb-1.5 block uppercase tracking-wider">Kategori</label><div class="relative"><select id="manualCat" class="custom-input appearance-none"><option value="Makanan">🍔 Makanan</option><option value="Transport">🚕 Transport</option><option value="Belanja">🛍️ Belanja</option><option value="Tagihan">⚡ Tagihan</option><option value="Hiburan">🎬 Hiburan</option><option value="Kesehatan">💊 Kesehatan</option><option value="Lainnya">📦 Lainnya</option></select><i class="fas fa-chevron-down absolute right-3 top-3.5 text-xs text-slate-500 pointer-events-none z-30"></i></div></div>
+                        <div id="walletWrapper"><label class="text-xs font-semibold text-slate-400 ml-1 mb-1.5 block uppercase tracking-wider">Dompet</label><div class="relative"><select id="manualWallet" class="custom-input appearance-none"><option value="Cash">💵 Cash</option><option value="E-Wallet">💳 E-Wallet</option><option value="Bank">🏦 Bank</option></select><i class="fas fa-chevron-down absolute right-3 top-3.5 text-xs text-slate-500 pointer-events-none z-30"></i></div></div>
+                    </div>
+                </div>
+                <button onclick="submitManual()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white py-4 rounded-xl text-sm font-bold shadow-lg shadow-purple-900/30 active:scale-95 transition mt-4 flex items-center justify-center gap-2"><i class="fas fa-save"></i> SIMPAN</button>
+            </div>
+
+            <div id="page-ai" class="hidden space-y-5 animate-fade-in">
+                <div class="text-center space-y-2 mt-4">
+                    <div class="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-purple-500/20 mb-3 animate-pulse"><i class="fas fa-robot text-3xl text-white"></i></div>
+                    <h3 class="font-bold text-white text-lg">AI Assistant</h3>
+                    <p class="text-xs text-slate-400 px-6">Ketik, Bicara, atau Scan struk.</p>
+                </div>
+                <div class="relative group">
+                    <textarea id="textInput" rows="3" placeholder="Contoh: Beli bensin 20rb pakai e-wallet" class="custom-input resize-none" enterkeyhint="done"></textarea>
+                    <button onclick="sendText()" id="sendBtn" class="absolute bottom-3 right-3 w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center text-white shadow-lg active:scale-90 transition hover:bg-purple-500 z-30"><i class="fas fa-paper-plane"></i></button>
+                </div>
+                <div class="flex items-center gap-4 my-2"><div class="h-px bg-slate-800 flex-1"></div><span class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Media</span><div class="h-px bg-slate-800 flex-1"></div></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="toggleRecording()" id="micBtn" class="flex flex-col items-center justify-center gap-2 p-5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 active:scale-95 transition group"><i class="fas fa-microphone text-xl text-rose-500"></i><span class="text-xs font-medium text-slate-300">Voice Note</span><div id="recordingIndicator" class="hidden flex items-center gap-1.5 mt-1"><span class="w-2 h-2 bg-rose-500 rounded-full recording-pulse"></span></div></button>
+                    <button onclick="document.getElementById('fileInput').click()" class="flex flex-col items-center justify-center gap-2 p-5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 active:scale-95 transition group"><i class="fas fa-camera text-xl text-emerald-500"></i><span class="text-xs font-medium text-slate-300">Scan Struk</span></button>
+                    <input type="file" id="fileInput" accept="image/*" capture="environment" class="hidden" onchange="handleFileUpload(this)">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="mainContent" class="hidden flex-col h-full relative">
+        <header class="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-5 py-4 flex justify-between items-center sticky top-0 z-40 pt-safe-top">
+            <div><h1 class="text-lg font-bold tracking-wide flex items-center gap-2"><i class="fas fa-chart-simple text-purple-500"></i> Monegment</h1><p class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold" id="headerSubtitle">Dashboard</p></div>
+            <div class="flex items-center gap-3">
+                <span id="premBadge" class="hidden bg-gradient-to-r from-amber-500 to-orange-500 text-white px-2 py-0.5 rounded-md text-[10px] font-bold shadow-lg flex items-center gap-1"><i class="fas fa-crown"></i> PRO</span>
+                <!-- PROFILE PIC: Prioritize display -->
+                <img id="profilePic" class="w-9 h-9 rounded-full border border-slate-700 object-cover shadow-inner hidden" src="" alt="Profile">
+                <div id="defaultProfile" class="w-9 h-9 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-300 shadow-inner"><i class="fas fa-user text-xs"></i></div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto no-scrollbar pb-36 px-5 py-6">
+            <!-- TAB 1: BERANDA -->
+            <section id="tab-beranda" class="tab-content active space-y-6">
+                <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-5 rounded-2xl border border-slate-700 shadow-lg text-center relative overflow-hidden group">
+                    <div class="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><i class="fas fa-wallet text-7xl text-white"></i></div>
+                    <p class="text-slate-400 text-[10px] font-bold mb-2 uppercase tracking-widest flex items-center justify-center gap-2"><i class="fas fa-coins text-amber-400"></i> Total Saldo</p>
+                    <h3 class="text-4xl font-bold text-white tracking-tight" id="valBalance">Rp 0</h3>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex-1 bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm"><div class="flex items-center gap-2 mb-2 text-emerald-400"><div class="w-6 h-6 rounded-full bg-emerald-500/10 flex items-center justify-center"><i class="fas fa-money-bill-wave text-[10px]"></i></div> <span class="text-xs text-slate-300 font-bold">Cash</span></div><p class="text-sm font-bold text-white truncate" id="balCash">Rp 0</p></div>
+                    <button onclick="openTransferModal()" class="w-12 h-12 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-purple-400 hover:bg-slate-600 hover:text-white transition shadow-lg shrink-0 z-10 -mx-5 active:scale-90 ring-4 ring-slate-900"><i class="fas fa-arrow-right-arrow-left text-sm"></i></button>
+                    <div class="flex-1 bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm text-right"><div class="flex items-center justify-end gap-2 mb-2 text-blue-400"><span class="text-xs text-slate-300 font-bold">E-Wallet</span> <div class="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center"><i class="fas fa-credit-card text-[10px]"></i></div></div><p class="text-sm font-bold text-white truncate" id="balWallet">Rp 0</p></div>
+                </div>
+                <div><div class="flex justify-between items-center mb-3"><h3 class="font-bold text-sm text-slate-300 flex items-center gap-2"><i class="fas fa-clock-rotate-left"></i> Transaksi Terkini</h3><button onclick="switchTab('riwayat')" class="text-xs text-purple-400 hover:text-purple-300 font-medium">Lihat Semua <i class="fas fa-chevron-right ml-1"></i></button></div><div class="space-y-3" id="miniList"></div></div>
+            </section>
+
+            <!-- TAB 2: ANALISIS (UPDATED UI) -->
+            <section id="tab-analisis" class="tab-content space-y-6">
+                 <!-- Pie Chart (Free Feature) -->
+                 <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700"><h3 class="font-bold text-sm mb-4 text-center text-slate-300"><i class="fas fa-chart-pie mr-2 text-purple-400"></i>Pengeluaran per Kategori</h3><div class="relative w-full aspect-square max-w-[250px] mx-auto"><canvas id="expenseChart"></canvas><div id="noDataChart" class="hidden absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500 gap-2"><i class="fas fa-circle-notch text-xl"></i><span>Belum ada data</span></div></div><div id="chartLegend" class="mt-6 space-y-2 text-xs"></div></div>
+                 
+                 <!-- UNIFIED PRO ANALYTICS SECTION -->
+                 <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden relative shadow-lg">
+                     
+                     <!-- LOCKED STATE (Default Visible for Free User) -->
+                     <div id="proLockScreen" class="p-8 flex flex-col items-center justify-center text-center relative z-10">
+                         <!-- Teaser Background -->
+                         <div class="absolute top-0 left-0 w-full h-full overflow-hidden z-0 opacity-20 pointer-events-none">
+                             <div class="absolute top-[-50%] left-[-20%] w-64 h-64 bg-purple-500 rounded-full blur-[80px]"></div>
+                             <div class="absolute bottom-[-50%] right-[-20%] w-64 h-64 bg-amber-500 rounded-full blur-[80px]"></div>
+                         </div>
+                         
+                         <div class="relative z-10">
+                             <div class="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.3)] mx-auto mb-4">
+                                 <i class="fas fa-crown text-2xl text-amber-500 animate-pulse"></i>
+                             </div>
+                             <h2 class="text-xl font-bold text-white mb-2">Analisis & Tren Pro</h2>
+                             <p class="text-xs text-slate-400 mb-6 max-w-[250px] mx-auto">Buka wawasan lengkap keuanganmu dengan fitur premium eksklusif.</p>
+                             
+                             <div class="text-left inline-block space-y-3 mb-8">
+                                 <div class="flex items-center gap-3 text-sm text-slate-300">
+                                     <div class="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center text-green-500"><i class="fas fa-check text-[10px]"></i></div>
+                                     <span>Grafik Tren Bulanan</span>
+                                 </div>
+                                 <div class="flex items-center gap-3 text-sm text-slate-300">
+                                     <div class="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center text-green-500"><i class="fas fa-check text-[10px]"></i></div>
+                                     <span>Monitoring Budget Real-time</span>
+                                 </div>
+                                 <div class="flex items-center gap-3 text-sm text-slate-300">
+                                     <div class="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center text-green-500"><i class="fas fa-check text-[10px]"></i></div>
+                                     <span>Insight Boros & Harian</span>
+                                 </div>
+                             </div>
+
+                             <button onclick="window.Telegram.WebApp.sendData('upgrade_request')" class="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-3.5 px-8 rounded-xl shadow-lg shadow-orange-900/20 active:scale-95 transition flex items-center justify-center gap-2">
+                                 <i class="fas fa-unlock"></i> Buka Akses Pro
+                             </button>
+                         </div>
+                     </div>
+
+                     <!-- UNLOCKED STATE (Hidden by default, toggled by JS) -->
+                     <div id="proContent" class="hidden">
+                         <!-- Trend Chart -->
+                         <div class="p-5 border-b border-slate-700">
+                             <h3 class="font-bold text-sm mb-4 text-center text-slate-300"><i class="fas fa-chart-column mr-2 text-blue-400"></i>Tren Saldo Bulanan</h3>
+                             <div class="relative w-full h-48"><canvas id="trendChart"></canvas></div>
+                         </div>
+                         
+                         <!-- Budget & Stats -->
+                         <div class="p-5 space-y-6 bg-slate-800/50">
+                            <!-- Budget Control -->
+                            <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+                                <div class="flex justify-between items-center mb-4"><h3 class="font-bold text-sm text-purple-400"><i class="fas fa-bullseye mr-2"></i>Batas Budget</h3><button onclick="editBudget()" class="text-xs bg-slate-700 px-2 py-1 rounded hover:bg-slate-600 transition"><i class="fas fa-pen mr-1"></i> Ubah</button></div>
+                                <div class="relative pt-1"><div class="flex mb-2 items-center justify-between"><span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-purple-600 bg-purple-200">Progres</span><span class="text-xs font-semibold inline-block text-purple-200" id="budgetPercent">0%</span></div><div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-slate-700"><div id="budgetBar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-purple-500 transition-all duration-500"></div></div><div class="flex justify-between text-xs text-slate-400"><span>Terpakai: <b class="text-white" id="usedAmount">Rp 0</b></span><span>Batas: <b class="text-white" id="targetAmount">Rp 0</b></span></div></div>
+                            </div>
+                            
+                            <!-- Detailed Stats -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50"><h3 class="text-[10px] uppercase text-slate-400 font-bold mb-2">Boros Di</h3><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500"><i class="fas fa-fire-flame-curved text-xs"></i></div><div class="overflow-hidden"><p class="text-sm font-bold text-white truncate" id="topCategory">-</p><p class="text-[10px] text-slate-500 truncate" id="topCatAmount">Rp 0</p></div></div></div>
+                                <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50"><h3 class="text-[10px] uppercase text-slate-400 font-bold mb-2">Rata-rata/Hari</h3><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500"><i class="fas fa-calendar-day text-xs"></i></div><div class="overflow-hidden"><p class="text-sm font-bold text-white truncate" id="dailyAvg">Rp 0</p><p class="text-[10px] text-slate-500">Bulan Ini</p></div></div></div>
+                            </div>
+                        </div>
+                     </div>
+                 </div>
+            </section>
+            
+            <!-- TAB 3: GOALS (Rencana) -->
+            <section id="tab-goals" class="tab-content space-y-4">
+                <div class="flex justify-between items-center mb-4"><h2 class="text-lg font-bold text-white">Tujuan Keuangan</h2><button onclick="openGoalModal()" class="text-xs bg-purple-600 px-3 py-1.5 rounded-lg hover:bg-purple-500 font-bold flex items-center gap-1"><i class="fas fa-plus"></i> Baru</button></div>
+                <div id="goalsList" class="space-y-3"><div class="text-center py-10 text-slate-500 text-xs">Belum ada tujuan</div></div>
+                <button onclick="optimizeGoals()" class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white py-3.5 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition mt-4 flex items-center justify-center gap-2"><i class="fas fa-wand-magic-sparkles"></i> Optimize Budget with AI</button>
+            </section>
+
+            <!-- TAB 4: RIWAYAT -->
+            <section id="tab-riwayat" class="tab-content space-y-4">
+                <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar"><button onclick="filterHistory('ALL')" class="filter-btn active px-4 py-2 bg-purple-600 text-white rounded-full text-xs font-bold whitespace-nowrap transition shadow-md"><i class="fas fa-list mr-1"></i> Semua</button><button onclick="filterHistory('IN')" class="filter-btn px-4 py-2 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold transition hover:bg-slate-700"><i class="fas fa-arrow-down mr-1"></i> Masuk</button><button onclick="filterHistory('OUT')" class="filter-btn px-4 py-2 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold transition hover:bg-slate-700"><i class="fas fa-arrow-up mr-1"></i> Keluar</button></div><div id="fullHistoryList" class="space-y-3 pb-10"></div>
+            </section>
+
+            <!-- TAB 5: MENU -->
+            <section id="tab-lainnya" class="tab-content space-y-4">
+                <div class="bg-slate-800 rounded-2xl border border-slate-700 p-4"><span class="text-sm font-medium block mb-1 text-slate-300">Status Akun</span><div class="flex justify-between items-center mt-2"><span class="text-lg font-bold text-white" id="accountType"><i class="fas fa-user text-slate-400 mr-2"></i> Free</span><span class="text-[10px] text-slate-400 bg-slate-900 px-2 py-1 rounded border border-slate-700 flex items-center gap-1" id="accountExp"><i class="fas fa-infinity text-[8px]"></i> Lifetime</span></div><button id="btnExtend" onclick="window.Telegram.WebApp.sendData('upgrade_request')" class="hidden w-full mt-3 bg-amber-500/10 text-amber-500 border border-amber-500/50 py-2 rounded-lg text-xs font-bold hover:bg-amber-500/20 transition flex items-center justify-center gap-2"><i class="fas fa-star"></i> Perpanjang</button></div>
+                <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+                    <button onclick="downloadExcel()" class="w-full flex items-center justify-between p-4 border-b border-slate-700 hover:bg-slate-700 transition"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center"><i class="fas fa-file-excel"></i></div><span class="text-sm font-medium text-slate-300">Export Data (Excel)</span></div><i class="fas fa-chevron-right text-xs text-slate-500"></i></button>
+                    <button onclick="openHelpModal()" class="w-full flex items-center justify-between p-4 hover:bg-slate-700 transition"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500"><i class="fas fa-circle-question"></i></div><span class="text-sm font-medium text-slate-300">Bantuan / FAQ</span></div><i class="fas fa-chevron-right text-xs text-slate-500"></i></button>
+                    <button id="btnAdminFeedback" onclick="downloadFeedback()" class="hidden w-full flex items-center justify-between p-4 border-t border-slate-700 bg-purple-900/20 hover:bg-purple-900/30 transition"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-500"><i class="fas fa-download"></i></div><span class="text-sm font-medium text-purple-400">Admin: Download Feedback</span></div></button>
+                </div>
+                
+                <!-- FEEDBACK FORM (FIXED: RESTORED MISSING ELEMENT) -->
+                <div id="feedbackFormContainer" class="bg-slate-800 rounded-2xl border border-slate-700 p-4 mt-4 hidden">
+                    <h3 class="text-sm font-bold text-slate-300 mb-2"><i class="fas fa-comment-dots mr-2 text-blue-500"></i>Kirim Masukan</h3>
+                    <textarea id="feedbackText" rows="3" class="custom-input text-xs mb-3" placeholder="Saran fitur atau lapor bug..."></textarea>
+                    <button onclick="sendFeedback()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-xs font-bold transition">Kirim</button>
+                </div>
+
+                <div class="bg-rose-900/10 rounded-2xl border border-rose-900/50 p-4 mt-4"><h3 class="text-xs font-bold text-rose-500 mb-2 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Zona Bahaya</h3><button onclick="resetDataConfirm()" class="w-full bg-rose-600 hover:bg-rose-500 text-white py-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-rose-900/20"><i class="fas fa-trash-can"></i> Reset Semua Data</button></div>
+            </section>
+        </main>
+        
+        <button id="fabAdd" onclick="openInputPage()" class="absolute bottom-32 right-5 w-14 h-14 bg-purple-600 rounded-full shadow-[0_4px_20px_rgba(147,51,234,0.5)] flex items-center justify-center text-white z-50 active:scale-90 transition animate-bounce-in group hover:bg-purple-500"><i class="fas fa-plus text-xl group-hover:rotate-90 transition-transform"></i></button>
+
+        <nav class="bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 w-full fixed bottom-0 z-50 pb-safe-nav pt-2 shadow-[0_-5px_20px_rgba(0,0,0,0.3)]">
+            <div class="flex justify-around items-center h-14 px-2">
+                <button onclick="switchTab('beranda')" class="nav-item active flex flex-col items-center justify-center w-full h-full text-purple-500 hover:bg-white/5 rounded-xl transition-colors group"><i class="fas fa-house text-xl mb-1 group-active:scale-90 transition-transform"></i><span class="text-[10px] font-bold tracking-wide">Beranda</span></button>
+                <button onclick="switchTab('analisis')" class="nav-item flex flex-col items-center justify-center w-full h-full text-slate-500 hover:bg-white/5 rounded-xl transition-colors group"><i class="fas fa-chart-simple text-xl mb-1 group-active:scale-90 transition-transform"></i><span class="text-[10px] font-bold tracking-wide">Analisis</span></button>
+                <!-- RENCANA PINDAH TENGAH -->
+                <button onclick="switchTab('goals')" class="nav-item flex flex-col items-center justify-center w-full h-full text-slate-500 hover:bg-white/5 rounded-xl transition-colors group"><i class="fas fa-bullseye text-xl mb-1 group-active:scale-90 transition-transform"></i><span class="text-[10px] font-bold tracking-wide">Rencana</span></button>
+                <!-- RIWAYAT GESER KANAN -->
+                <button onclick="switchTab('riwayat')" class="nav-item flex flex-col items-center justify-center w-full h-full text-slate-500 hover:bg-white/5 rounded-xl transition-colors group"><i class="fas fa-clock-rotate-left text-xl mb-1 group-active:scale-90 transition-transform"></i><span class="text-[10px] font-bold tracking-wide">Riwayat</span></button>
+                <button onclick="switchTab('lainnya')" class="nav-item flex flex-col items-center justify-center w-full h-full text-slate-500 hover:bg-white/5 rounded-xl transition-colors group"><i class="fas fa-bars text-xl mb-1 group-active:scale-90 transition-transform"></i><span class="text-[10px] font-bold tracking-wide">Menu</span></button>
+            </div>
+        </nav>
+    </div>
+
+    <!-- GOAL DEPOSIT MODAL -->
+    <div id="goalDepositModal" class="hidden fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 p-5 shadow-2xl">
+            <h3 class="text-lg font-bold text-white mb-1 text-center">Isi Tabungan</h3>
+            <p class="text-xs text-slate-400 text-center mb-4" id="goalDepositTitle">Target: -</p>
+            
+            <input type="hidden" id="depGoalId">
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[10px] text-slate-400 block mb-1 uppercase font-bold">Sumber Dana</label>
+                    <div class="relative">
+                        <select id="depWallet" class="custom-input appearance-none">
+                            <option value="Cash">💵 Cash</option>
+                            <option value="E-Wallet">💳 E-Wallet</option>
+                            <option value="Bank">🏦 Bank</option>
+                        </select>
+                        <i class="fas fa-chevron-down absolute right-3 top-3.5 text-xs text-slate-500 pointer-events-none"></i>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-400 block mb-1 uppercase font-bold">Nominal (Rp)</label>
+                    <input type="number" id="depAmount" placeholder="0" class="custom-input font-bold text-lg text-emerald-400">
+                </div>
+                
+                <div class="flex gap-3 pt-2">
+                    <button onclick="document.getElementById('goalDepositModal').classList.add('hidden')" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-xl text-sm font-bold transition">Batal</button>
+                    <button onclick="submitGoalDeposit()" class="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold transition shadow-lg flex items-center justify-center gap-2">
+                        <i class="fas fa-check"></i> Simpan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GOAL MODAL -->
+    <div id="goalModal" class="hidden fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 p-5 shadow-2xl">
+            <h3 class="text-lg font-bold text-white mb-4 text-center">Tujuan Baru</h3>
+            <div class="space-y-3">
+                <input type="text" id="goalTitle" placeholder="Nama (ex: Laptop)" class="custom-input">
+                <input type="number" id="goalTarget" placeholder="Target (Rp)" class="custom-input">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="text-[10px] text-slate-400 block mb-1">Tenggat</label><input type="date" id="goalDeadline" class="custom-input"></div>
+                    <div><label class="text-[10px] text-slate-400 block mb-1">Prioritas</label><select id="goalPriority" class="custom-input"><option value="P1">P1 - Tinggi</option><option value="P2">P2 - Sedang</option><option value="P3">P3 - Rendah</option></select></div>
+                </div>
+                <button onclick="submitGoal()" class="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg text-sm font-bold mt-2 transition shadow-lg">Simpan</button>
+                <button onclick="document.getElementById('goalModal').classList.add('hidden')" class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg text-sm transition">Batal</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="transferModal" class="hidden fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 p-5 shadow-2xl">
+            <h3 class="text-lg font-bold text-white mb-4 text-center">Transfer Saldo</h3>
+            <div class="space-y-3">
+                <div class="flex gap-2 items-center"><span class="text-xs text-slate-400 w-12 font-bold uppercase">Dari</span><div class="relative flex-1"><select id="trfSource" class="custom-input appearance-none"><option value="Cash">💵 Cash</option><option value="E-Wallet">💳 E-Wallet</option><option value="Bank">🏦 Bank</option></select><i class="fas fa-chevron-down absolute right-3 top-3 text-xs text-slate-500 pointer-events-none"></i></div></div>
+                <div class="flex justify-center"><i class="fas fa-arrow-down text-slate-500 text-xs"></i></div>
+                <div class="flex gap-2 items-center"><span class="text-xs text-slate-400 w-12 font-bold uppercase">Ke</span><div class="relative flex-1"><select id="trfTarget" class="custom-input appearance-none"><option value="E-Wallet">💳 E-Wallet</option><option value="Cash">💵 Cash</option><option value="Bank">🏦 Bank</option></select><i class="fas fa-chevron-down absolute right-3 top-3 text-xs text-slate-500 pointer-events-none"></i></div></div>
+                <input type="number" id="trfAmount" placeholder="Nominal (Rp)" class="custom-input font-bold">
+                <button onclick="submitTransfer()" class="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg text-sm font-bold mt-2 transition shadow-lg flex items-center justify-center gap-2">Kirim Sekarang</button>
+                <button onclick="document.getElementById('transferModal').classList.add('hidden')" class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg text-sm transition">Batal</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="editModal" class="hidden fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl transform scale-95 transition-transform duration-300 p-5" id="editModalContent">
+            <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-white">Edit</h3><button onclick="closeEditModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button></div>
+            <input type="hidden" id="editId">
+            <div class="space-y-3">
+                <input type="text" id="editDesc" class="custom-input" placeholder="Keterangan">
+                <input type="number" id="editAmount" class="custom-input" placeholder="Nominal">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="relative"><select id="editCategory" class="custom-input appearance-none"><option value="Makanan">Makanan</option><option value="Transport">Transport</option><option value="Belanja">Belanja</option><option value="Tagihan">Tagihan</option><option value="Hiburan">Hiburan</option><option value="Kesehatan">Kesehatan</option><option value="Pemasukan">Pemasukan</option><option value="Lainnya">Lainnya</option></select><i class="fas fa-chevron-down absolute right-2 top-3 text-[10px] text-slate-500 pointer-events-none"></i></div>
+                    <div class="relative"><select id="editWallet" class="custom-input appearance-none"><option value="Cash">Cash</option><option value="E-Wallet">E-Wallet</option><option value="Bank">Bank</option></select><i class="fas fa-chevron-down absolute right-2 top-3 text-[10px] text-slate-500 pointer-events-none"></i></div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6"><button onclick="deleteTransaction()" class="flex-1 bg-rose-500/10 text-rose-400 border border-rose-500/50 py-2.5 rounded-xl text-sm font-bold hover:bg-rose-500 hover:text-white transition">Hapus</button><button onclick="saveEdit()" class="flex-[2] bg-purple-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-purple-500 transition shadow-lg">Simpan</button></div>
+        </div>
+    </div>
+
+    <!-- RESULT MODAL -->
+    <div id="resultModal" class="hidden fixed inset-0 z-[90] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 opacity-0 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-3xl border border-purple-500/30 p-6 shadow-2xl transform scale-90 transition-transform duration-300 relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-indigo-500"></div>
+            <div class="text-center mb-4">
+                <div class="w-14 h-14 bg-purple-500/10 rounded-full flex items-center justify-center mx-auto mb-3 text-purple-400 text-2xl animate-pulse">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                </div>
+                <h3 class="text-xl font-bold text-white">Saran AI</h3>
+            </div>
+            <div id="resultContent" class="text-sm text-slate-300 space-y-3 leading-relaxed mb-6 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50"></div>
+            <div id="resultActions" class="space-y-3">
+                <button onclick="closeResultModal()" class="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-xl font-bold transition">Tutup</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="helpModal" class="hidden fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl transform scale-95 transition-transform duration-300 p-5" id="helpModalContent">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-700"><h3 class="text-lg font-bold text-white"><i class="fas fa-circle-question mr-2 text-blue-500"></i>Bantuan</h3><button onclick="closeHelpModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button></div>
+            <div class="space-y-4 text-sm text-slate-300 max-h-[60vh] overflow-y-auto no-scrollbar">
+                <div class="bg-slate-900 p-3 rounded-xl"><h4 class="font-bold text-white mb-1">📝 Input Transaksi</h4><p class="text-xs leading-relaxed">1. Tekan tombol <b>+</b> di pojok kanan bawah.<br>2. Pilih <b>Manual</b> untuk isi sendiri, atau <b>AI Magic</b> untuk otomatis.<br>3. Di AI, Anda bisa ketik kalimat bebas, rekam suara, atau foto struk.</p></div>
+                <div class="bg-slate-900 p-3 rounded-xl"><h4 class="font-bold text-white mb-1">📊 Analisis & Budget</h4><p class="text-xs leading-relaxed">Masuk ke tab <b>Analisis</b> untuk melihat grafik pengeluaran. Anda bisa set <b>Batas Budget</b> agar dapat peringatan jika boros.</p></div>
+                <div class="bg-slate-900 p-3 rounded-xl"><h4 class="font-bold text-white mb-1">🎯 Rencana Keuangan</h4><p class="text-xs leading-relaxed">Gunakan tab <b>Rencana</b> untuk membuat target tabungan (ex: Beli HP). Klik <b>Optimize</b> untuk minta saran AI mengatur keuangan Anda.</p></div>
+                <div class="bg-slate-900 p-3 rounded-xl"><h4 class="font-bold text-white mb-1">👑 Fitur Pro</h4><p class="text-xs leading-relaxed">User Pro bisa akses Scan Bon, Voice Note, Export Excel Unlimited, dan Grafik Tren Bulanan.</p></div>
+            </div>
+            <button onclick="closeHelpModal()" class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-xl text-sm mt-4 transition font-bold">Tutup</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
